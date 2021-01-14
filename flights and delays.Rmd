@@ -1,0 +1,252 @@
+---
+title: ""
+author: "Noa Grinderfer-204587612"
+date: "19/04/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE, warning=FALSE}
+library(nycflights13)
+library(ggplot2)
+library(scales)
+library(plyr)
+library(dplyr)
+library(maps)
+library(reshape2)
+library(ggpubr)
+library(tibble)
+library(nullabor)
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+flights <- flights
+weather <- weather
+airports <- airports
+planes <- planes
+```
+
+```{r echo=FALSE, warning=FALSE}
+#seperating the 'time_hour' column into two columns 
+fli <- data.frame(do.call('rbind', strsplit(as.character(flights$time_hour),' ',fixed=TRUE)))
+fli$X2 <- NULL
+
+#creating a binary column to say if there is a delay or not.
+fli$delay <- ifelse(flights$dep_delay>=15, 1, 0)
+df_flights <- count(fli, X1)
+df <- count(fli,delay,X1)
+
+#vector of the delays flights only
+delay_count <- df$n[366:730]
+
+#creating a df with the num of delays & num of flights.
+df <- df[0:365,]
+df$delay <- delay_count
+names(df) <- c("delays","date","flights")
+df$flights <- df_flights$n
+df <- df[,c(2,3,1)]
+df <- df[order(df$flights ),]
+
+#finding the dates with the fewer flights.
+min_5 <- head(df,5)
+```
+
+### TEMPORAL EFFECTS
+
+On this graph we see the daily num of the flights (the blue line) and the daily num of the delays (black line). In order to create this graph I created a new df, which including the date,the number of flights and number of delays, and ploted them together.
+In order to have these specific data I first seperated the 'time_hour' col into two,in order to get a 'date' coloumn. Another step was to create a binary col which says if the flights delayed or not. After that I aggrigte the data toghere using the count method and took the relevant data to this plot.
+In addition, I found the dated with the fewer flights and marked them on the plot with a label and bigger dots.
+
+
+```{r fig.width=10,fig.height=3 , warning=FALSE}
+ ggplot(data = df, aes(x=as.Date(date)))+geom_segment(aes(xend=as.Date(date),y=0,yend=delays), col="black")+geom_point(aes(y=flights),col="deepskyblue4")+geom_line(aes(y=flights), col="deepskyblue4")+
+ geom_point(data = df[1:2,],col="darkblue",size=5, aes(y=flights))+
+ ylim(0,1000)+ylab("count")+scale_x_date(labels = date_format("%m/%y"), breaks = date_breaks("1 month")) +xlab("dates")+ggtitle("Temporal Effects - Weekly Cycles")+
+  annotate("text",x=min(as.Date(df$date)) ,y=290, label="Delays", size=5.5)+
+  annotate("text",x=min(as.Date(df$date)) ,y=650, label="Flights", col="deepskyblue4", size=5.5)+
+  annotate("text",x=max(as.Date(df$date))-20 ,y=580, label="Fewer flights - Thanksgiving", col="darkblue", size=3.5)
+
+
+```
+
+
+
+```{r echo=FALSE, warning=FALSE}
+origins <- select(flights,c("origin","dest","dep_delay"))
+
+#Creating data with all the flights from EWR airport, the destinations and delay times.
+ewr <- subset(origins,origin=="EWR")
+#crating a df with the number of the flights and delays by destinations.
+ewr <- group_by(ewr,dest) %>% summarise(n=n(),delayed = sum(dep_delay>15, na.rm = T))
+ewr$rate <- ewr$delayed/ewr$n
+
+#Creating a df with all the longtitued and latitued of the destinations.
+air_cord <- data_frame(airports$lon,airports$lat, airports$faa)
+names(air_cord) <- c("lon","lat","dest")
+
+#Combining the the df by destinations.
+joined_ewr <- left_join(ewr,air_cord, by="dest")
+
+#cutting the delays rates into 5 categories.
+joined_ewr$delay_rate <- cut(joined_ewr$rate,breaks=c(-Inf,0.1,0.15,0.2,0.25,Inf), labels = c("<10%","10-15%","15-20%","20-25%",">25%"))
+
+#Removing 2 outliers
+joined_ewr <- joined_ewr[order(joined_ewr$lon),]
+joined_ewr <- joined_ewr[-c(1,2),]
+```
+
+###  Precentage of flights departures delays (delay of more then 15 minutes)
+
+On this graph we see the states map, and flights from EWR airport to many destinations in the states.
+The lines represent the flights, and the colors of the lines represent the rate of the delays to each destanation, according to the catagories in the legend. 
+In order to build this graph I first subseted only the EWR relevant data (dest, dep_delay), then I summrized this data using the 'group_by' function, later I calculated the rates of the delays from EWR to all the destanations and combined this data with the destinations lon and lat (from airports df) in order to plot it on the map. The last step I took was to remove the outliers (two points) from the map because they were quite far destinations and had too much influence on the plot look.
+
+```{r fig.width=9,fig.height=7 , warning=FALSE}
+#finding the States map.
+states <- map_data("state")
+
+#Taking the lon and lat of the origin airport.
+x_ewr = airports$lon[airports$faa=="EWR"]
+y_ewr = airports$lat[airports$faa=="EWR"]
+
+#ploting the map of all flights from EWR to other destinations coloring the lines by the delays categories.
+ggplot(joined_ewr)+geom_polygon(data=states,aes(x = long, y = lat, group = group),fill="white", colour = "grey")+
+geom_point(aes(x=lon, y=lat))+
+geom_text(aes(x=lon,y=lat, label=dest), check_overlap = T)+
+geom_segment(aes(x=x_ewr, y=y_ewr, xend=lon, yend=lat, color=delay_rate),size=1)+ scale_color_manual(values=c("lightgrey","#F0E442", "#E69F00", "#56B4E9", "#009E73", "#0072B2"))+
+ggtitle("Flights from EWR airport", subtitle = "Delay : Grater then 15 mins departure delay")
+```
+
+
+
+
+In this graph, we decided to show an heatmap of departures delays (measured in minutes) as a function of the day and the hour of the day in three diffrant airports in New-York.
+
+The comparison between the airports gives it more depth and helping us to understand if there is a shared pattern in the delays time or it depands on the specific airport.
+
+When we checked this we wanted to understand if the cause for the delay depands on internal organization such as changing the shift of employees at the airport or as it is a result of more general reasons Like air traffic congestion.
+
+The findings show that in the morning the flights depart on time, and as the day progresses, the average deptures delays is raising in all the three airports. It can also be seen that on Saturday there are significantly fewer delays.
+
+Although the similar trends between the three airports, there are still few differences.
+For example, in JFK the time with the longest delays is usually at 9pm and in the two others it is a bit later (10pm-11pm). There are also difrances in the peak hour (with the more frequent flights), which in JFK is on 8AM and in the two others is on 6AM.
+
+In addition to the heatmap colors, we added a red line that indicates the hour with the higher number of  flights. The purpose of adding this line was to test the hypothesis whether there is a correlation between the number of flights and the average delay. We can see that this hypothesis faild, when in those hours found the lowest avg delays time in the three airports.
+
+```{r echo=FALSE, warning=FALSE}
+#In the following code sections, we created some  data frames according to the different airports. To them we have #added time variables to the data which include the days of the week.
+
+flights_jfk <-
+  nycflights13::flights %>% 
+  filter(origin == "JFK") %>% 
+  mutate(hh = round(sched_dep_time / 100, 0) - 1) %>% 
+  mutate(ymd = lubridate::ymd(sprintf("%04.0f-%02.0f-%02.0f", year, month, day))) %>% 
+  mutate(wd = lubridate::wday(ymd, label = TRUE))
+avr_delay_jfk<-aggregate( dep_delay~ wd+hour , flights_jfk, mean)
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+flights_ewr <-
+  nycflights13::flights %>% 
+  filter(origin == "EWR") %>% 
+  mutate(hh = round(sched_dep_time / 100, 0) - 1) %>% 
+  mutate(ymd = lubridate::ymd(sprintf("%04.0f-%02.0f-%02.0f", year, month, day))) %>% 
+  mutate(wd = lubridate::wday(ymd, label = TRUE))
+avr_delay_ewr<-aggregate( dep_delay~ wd+hour , flights_ewr, mean)
+
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+flights_lga <-
+  nycflights13::flights %>% 
+  filter(origin == "LGA") %>% 
+  mutate(hh = round(sched_dep_time / 100, 0) - 1) %>% 
+  mutate(ymd = lubridate::ymd(sprintf("%04.0f-%02.0f-%02.0f", year, month, day))) %>% 
+  mutate(wd = lubridate::wday(ymd, label = TRUE))
+avr_delay_lga<-aggregate( dep_delay~ wd+hour , flights_lga, mean)
+
+
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+ferq_jfr<-table(flights_jfk$hour)
+
+ferq_ewr<-table(flights_ewr$hour)
+
+
+ferq_lga<-table(flights_lga$hour)
+```
+
+
+```{r}
+jfk<-ggplot(avr_delay_jfk, aes(x =factor(hour), y =wd , fill = dep_delay)) +
+  geom_tile(colour = "white") + ylab("weekdays")+xlab("")+geom_vline(xintercept =4 ,color="red")
+
+
+ewr<-ggplot(avr_delay_ewr, aes(x =factor(hour), y =wd , fill = dep_delay)) +
+  geom_tile(colour = "white") + ylab("weekdays")+xlab("")+geom_vline(xintercept =2 ,color="red")
+
+lga<-ggplot(avr_delay_lga, aes(x = factor(hour), y =wd , fill = dep_delay)) +
+  geom_tile(colour = "white")+xlab("hour") + ylab("weekdays")+geom_vline(xintercept =2 ,color="red")
+
+```
+
+
+
+```{r}
+figure<-ggarrange(jfk,ewr,lga , 
+          ncol = 1, nrow = 3,legend="right",common.legend=TRUE)
+ 
+annotate_figure(figure,top = text_grob("Average of departure  delays  by weekdays and hours ", color = 3, face = "bold", size = 12),left = text_grob("LGA                     EWR                         JFK", color = "green", rot = 90),bottom=text_grob("The red line indicates the hour with the highest number of flights",color = "red"), fig.lab = "heatmap", fig.lab.face = "bold" )
+  
+```
+
+
+
+```{r}
+flights$delay <- ifelse(flights$dep_delay>=15, 1, 0)
+month_table<-table(flights$month,flights$delay)
+
+#Creating a new data  frame that includes the number of flights per month and the rate of delays
+
+df_month<-data.frame(rbind(month_table))
+colnames(df_month)<-c("count_on_time","count_del")
+df_month<-mutate(df_month,rate_delay=count_del/count_on_time)
+df_month<- df_month %>% rownames_to_column("month")
+df_month<-transform(df_month,month=as.numeric(month))
+
+
+```
+
+```{r}
+ggplot(df_month, aes(x =factor(month)))+ geom_bar(aes(y=rate_delay),stat="identity",fill="darkblue")+theme(plot.background = element_rect(fill = "wheat"))+
+  theme(axis.text.x = element_text( hjust = 1, size = 10))+theme(plot.title = element_text(hjust = 0.5, face= "bold", colour = "springgreen3"))+
+  labs(title = "The rate of delays by month", x="month",y="rate")
+```
+
+
+```{r}
+min_rate<-min(df_month$rate_delay)
+max_rate<-max(df_month$rate_delay)
+
+#Creating a graphic lineup from a uniform distribution
+
+ggplot(lineup(null_dist('rate_delay',dist = "unif",list(min_rate,max_rate)),df_month), aes(factor(month))) +
+  geom_bar(aes(y=rate_delay),stat="identity") +
+  facet_wrap(~ .sample) +theme(plot.background = element_rect(fill = "wheat"))+
+  theme(axis.text.x = element_text( hjust = 1, size = 10))+theme(plot.title = element_text(hjust = 0.5, face= "bold", colour = "springgreen3"))+
+  labs(title = "line-up of rate delay", x="month",y="rate")
+  
+  
+```
+
+
+The real graph cannot be easily identified.
+The real graph, like the rest of the graphs, seems to be independent of the months. 
+For example, in December, there is a large delay, although November and January have a small delay.
+You can learn from the graph, which does not reject the null hypothesis, meaning that we are left with the hypothesis that there is no dependency between the months. Because if there really was a seasonal effect on the late rate we would expect to easily identify the true graph that was not drawn from a uniform random variable with noise. Therefore, the difficulty of identifying it indicates a lack of seasonal pattern but a random noise between the different months, which means that there is a dependency between the months such as the null hypothesis.
+
+
